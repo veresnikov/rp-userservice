@@ -12,23 +12,24 @@ const (
 	TransportName    = "domain"
 	ExchangeName     = "domain_event_exchange"
 	ExchangeKind     = "topic"
+	QueueName        = "user_domain_event"
 	RoutingKeyPrefix = "user."
 	ContentType      = "application/json"
 )
 
-func NewTransport(logger logging.Logger, producer amqp.Producer) outbox.Transport {
-	return &transport{
+func NewOutboxTransport(logger logging.Logger, producer amqp.Producer) outbox.Transport {
+	return &outboxTransport{
 		logger:   logger,
 		producer: producer,
 	}
 }
 
-type transport struct {
+type outboxTransport struct {
 	logger   logging.Logger
 	producer amqp.Producer
 }
 
-func (t *transport) HandleEvents(ctx context.Context, correlationID, eventType, payload string) error {
+func (t *outboxTransport) HandleEvents(ctx context.Context, correlationID, eventType, payload string) error {
 	l := t.logger.WithFields(logging.Fields{
 		"correlationID": correlationID,
 		"eventType":     eventType,

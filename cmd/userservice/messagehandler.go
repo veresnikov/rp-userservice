@@ -45,14 +45,33 @@ func messageHandler(logger logging.Logger) *cli.Command {
 			databaseConnectionPool := mysql.NewConnectionPool(databaseConnector.TransactionalClient())
 
 			amqpConnection := newAMQPConnection(cnf.AMQP, logger)
+			queueConfig := &amqp.QueueConfig{
+				Name:    integrationevent.QueueName,
+				Durable: true,
+			}
+			bindConfig := &amqp.BindConfig{
+				QueueName:    integrationevent.QueueName,
+				ExchangeName: integrationevent.ExchangeName,
+				RoutingKeys:  []string{integrationevent.RoutingKeyPrefix + "#"},
+			}
 			amqpEventProducer := amqpConnection.Producer(
 				&amqp.ExchangeConfig{
 					Name:    integrationevent.ExchangeName,
 					Kind:    integrationevent.ExchangeKind,
 					Durable: true,
 				},
-				nil,
-				nil,
+				queueConfig,
+				bindConfig,
+			)
+			amqpTransport := integrationevent.NewAMQPTransport(logger)
+			amqpConnection.Consumer(
+				c.Context,
+				amqpTransport.Handler(),
+				queueConfig,
+				bindConfig,
+				&amqp.QoSConfig{
+					PrefetchCount: 100,
+				},
 			)
 			err = amqpConnection.Start()
 			if err != nil {
@@ -64,7 +83,7 @@ func messageHandler(logger logging.Logger) *cli.Command {
 
 			outboxEventHandler := outbox.NewEventHandler(outbox.EventHandlerConfig{
 				TransportName:  integrationevent.TransportName,
-				Transport:      integrationevent.NewTransport(logger, amqpEventProducer),
+				Transport:      integrationevent.NewOutboxTransport(logger, amqpEventProducer),
 				ConnectionPool: databaseConnectionPool,
 				Logger:         logger,
 			})
