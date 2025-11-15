@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"userservice/api/server/userinternal"
+	"userservice/api/server/userpublicapi"
 	appservice "userservice/pkg/user/application/service"
 	"userservice/pkg/user/infrastructure/integrationevent"
 	inframysql "userservice/pkg/user/infrastructure/mysql"
@@ -57,7 +57,7 @@ func service(logger logging.Logger) *cli.Command {
 			luow := inframysql.NewLockableUnitOfWork(libLUow)
 			eventDispatcher := outbox.NewEventDispatcher(appID, integrationevent.TransportName, integrationevent.NewEventSerializer(), libUoW)
 
-			userInternalAPI := transport.NewUserInternalAPI(
+			userPublicAPIServer := transport.NewUserInternalAPI(
 				query.NewUserQueryService(databaseConnector.TransactionalClient()),
 				appservice.NewUserService(uow, luow, eventDispatcher),
 			)
@@ -71,7 +71,7 @@ func service(logger logging.Logger) *cli.Command {
 				grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 					middlewares.NewGRPCLoggingMiddleware(logger),
 				))
-				userinternal.RegisterUserInternalServiceServer(grpcServer, userInternalAPI)
+				userpublicapi.RegisterUserPublicAPIServer(grpcServer, userPublicAPIServer)
 				graceCallback(c.Context, logger, cnf.Service.GracePeriod, func(_ context.Context) error {
 					grpcServer.GracefulStop()
 					return nil

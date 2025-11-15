@@ -12,7 +12,7 @@ import (
 )
 
 type UserService interface {
-	CreateUser(status model.UserStatus, login string) (uuid.UUID, error)
+	CreateUser(login string) (uuid.UUID, error)
 	UpdateUserStatus(userID uuid.UUID, status model.UserStatus) error
 	UpdateUserEmail(userID uuid.UUID, email *string) error
 	UpdateUserTelegram(userID uuid.UUID, telegram *string) error
@@ -34,7 +34,7 @@ type userService struct {
 	eventDispatcher domain.EventDispatcher
 }
 
-func (u userService) CreateUser(status model.UserStatus, login string) (uuid.UUID, error) {
+func (u userService) CreateUser(login string) (uuid.UUID, error) {
 	_, err := u.userRepository.Find(model.FindSpec{
 		Login: &login,
 	})
@@ -50,6 +50,7 @@ func (u userService) CreateUser(status model.UserStatus, login string) (uuid.UUI
 		return uuid.Nil, err
 	}
 
+	status := model.Blocked
 	currentTime := time.Now()
 	err = u.userRepository.Store(model.User{
 		UserID:    userID,
