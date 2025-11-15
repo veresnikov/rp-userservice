@@ -17,6 +17,24 @@ services:
       userservice-db:
         condition: service_healthy
 
+  userservice-workflow-worker:
+    container_name: userservice-workflow-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - workflow-worker
+    environment:
+      USER_DATABASE_HOST: userservice-db
+      USER_DATABASE_NAME: userservice_db
+      USER_DATABASE_USER: userservice
+      USER_DATABASE_PASSWORD: 12345Q
+
+      USER_TEMPORAL_HOST: userservice-temporal:7233
+    depends_on:
+      userservice-db:
+        condition: service_healthy
+
   userservice-message-handler:
     container_name: userservice-message-handler
     build:
@@ -33,6 +51,8 @@ services:
       USER_AMQP_HOST: userservice-rmq
       USER_AMQP_USER: guest
       USER_AMQP_PASSWORD: guest
+
+      USER_TEMPORAL_HOST: userservice-temporal:7233
     depends_on:
       userservice-db:
         condition: service_healthy

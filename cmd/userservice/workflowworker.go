@@ -6,30 +6,31 @@ import (
 
 	"gitea.xscloud.ru/xscloud/golib/pkg/application/logging"
 	libio "gitea.xscloud.ru/xscloud/golib/pkg/common/io"
-	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/amqp"
 	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/mysql"
 	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/outbox"
 	"github.com/gorilla/mux"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
+	appservice "userservice/pkg/user/application/service"
 	"userservice/pkg/user/infrastructure/integrationevent"
+	inframysql "userservice/pkg/user/infrastructure/mysql"
 	"userservice/pkg/user/infrastructure/temporal"
+	"userservice/pkg/user/infrastructure/temporal/worker"
 )
 
-type messageHandlerConfig struct {
+type workflowWorkerConfig struct {
 	Service  Service  `envconfig:"service"`
 	Database Database `envconfig:"database" required:"true"`
-	AMQP     AMQP     `envconfig:"amqp" required:"true"`
 	Temporal Temporal `envconfig:"temporal" required:"true"`
 }
 
-func messageHandler(logger logging.Logger) *cli.Command {
+func workflowWorker(logger logging.Logger) *cli.Command {
 	return &cli.Command{
-		Name:   "message-handler",
+		Name:   "workflow-worker",
 		Before: migrateImpl(logger),
 		Action: func(c *cli.Context) error {
-			cnf, err := parseEnvs[messageHandlerConfig]()
+			cnf, err := parseEnvs[workflowWorkerConfig]()
 			if err != nil {
 				return err
 			}
@@ -54,55 +55,17 @@ func messageHandler(logger logging.Logger) *cli.Command {
 				temporalClient.Close()
 				return nil
 			}))
-			workflowService := temporal.NewWorkflowService(temporalClient)
 
-			amqpConnection := newAMQPConnection(cnf.AMQP, logger)
-			queueConfig := &amqp.QueueConfig{
-				Name:    integrationevent.QueueName,
-				Durable: true,
-			}
-			bindConfig := &amqp.BindConfig{
-				QueueName:    integrationevent.QueueName,
-				ExchangeName: integrationevent.ExchangeName,
-				RoutingKeys:  []string{integrationevent.RoutingKeyPrefix + "#"},
-			}
-			amqpEventProducer := amqpConnection.Producer(
-				&amqp.ExchangeConfig{
-					Name:    integrationevent.ExchangeName,
-					Kind:    integrationevent.ExchangeKind,
-					Durable: true,
-				},
-				queueConfig,
-				bindConfig,
-			)
-			amqpTransport := integrationevent.NewAMQPTransport(logger, workflowService)
-			amqpConnection.Consumer(
-				c.Context,
-				amqpTransport.Handler(),
-				queueConfig,
-				bindConfig,
-				&amqp.QoSConfig{
-					PrefetchCount: 100,
-				},
-			)
-			err = amqpConnection.Start()
-			if err != nil {
-				return err
-			}
-			closer.AddCloser(libio.CloserFunc(func() error {
-				return amqpConnection.Stop()
-			}))
-
-			outboxEventHandler := outbox.NewEventHandler(outbox.EventHandlerConfig{
-				TransportName:  integrationevent.TransportName,
-				Transport:      integrationevent.NewOutboxTransport(logger, amqpEventProducer),
-				ConnectionPool: databaseConnectionPool,
-				Logger:         logger,
-			})
+			libUoW := mysql.NewUnitOfWork(databaseConnectionPool, inframysql.NewRepositoryProvider)
+			libLUow := mysql.NewLockableUnitOfWork(libUoW, mysql.NewLocker(databaseConnectionPool))
+			uow := inframysql.NewUnitOfWork(libUoW)
+			luow := inframysql.NewLockableUnitOfWork(libLUow)
+			eventDispatcher := outbox.NewEventDispatcher(appID, integrationevent.TransportName, integrationevent.NewEventSerializer(), libUoW)
 
 			errGroup := errgroup.Group{}
 			errGroup.Go(func() error {
-				return outboxEventHandler.Start(c.Context)
+				w := worker.NewWorker(temporalClient, appservice.NewUserService(uow, luow, eventDispatcher))
+				return w.Run(worker.InterruptChannel())
 			})
 
 			errGroup.Go(func() error {

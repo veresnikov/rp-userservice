@@ -15,6 +15,7 @@ import (
 type UserService interface {
 	StoreUser(ctx context.Context, user appmodel.User) (uuid.UUID, error)
 	SetUserStatus(ctx context.Context, userID uuid.UUID, status int) error
+	FindUser(ctx context.Context, userID uuid.UUID) (appmodel.User, error)
 }
 
 func NewUserService(
@@ -79,6 +80,25 @@ func (s *userService) SetUserStatus(ctx context.Context, userID uuid.UUID, statu
 	return s.luow.Execute(ctx, []string{userLock(userID)}, func(provider RepositoryProvider) error {
 		return s.domainService(ctx, provider.UserRepository(ctx)).UpdateUserStatus(userID, model.UserStatus(status))
 	})
+}
+
+func (s *userService) FindUser(ctx context.Context, userID uuid.UUID) (appmodel.User, error) {
+	var user appmodel.User
+	err := s.luow.Execute(ctx, []string{userLock(userID)}, func(provider RepositoryProvider) error {
+		domainUser, err := provider.UserRepository(ctx).Find(model.FindSpec{UserID: &userID})
+		if err != nil {
+			return err
+		}
+		user = appmodel.User{
+			UserID:   domainUser.UserID,
+			Status:   int(domainUser.Status),
+			Login:    domainUser.Login,
+			Email:    domainUser.Email,
+			Telegram: domainUser.Telegram,
+		}
+		return nil
+	})
+	return user, err
 }
 
 func (s *userService) domainService(ctx context.Context, repository model.UserRepository) service.UserService {
