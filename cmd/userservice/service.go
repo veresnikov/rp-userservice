@@ -11,6 +11,7 @@ import (
 	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/mysql"
 	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/outbox"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -70,6 +71,7 @@ func service(logger logging.Logger) *cli.Command {
 				}
 				grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 					middlewares.NewGRPCLoggingMiddleware(logger),
+					middlewares.NewGRPCMetricsMiddleware(),
 				))
 				userpublicapi.RegisterUserPublicAPIServer(grpcServer, userPublicAPIServer)
 				graceCallback(c.Context, logger, cnf.Service.GracePeriod, func(_ context.Context) error {
@@ -81,6 +83,7 @@ func service(logger logging.Logger) *cli.Command {
 			errGroup.Go(func() error {
 				router := mux.NewRouter()
 				registerHealthcheck(router)
+				router.Handle("/metrics", promhttp.Handler())
 				// nolint:gosec
 				server := http.Server{
 					Addr:    cnf.Service.HTTPAddress,
